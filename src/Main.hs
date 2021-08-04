@@ -76,9 +76,9 @@ updateWorld dt (MkWorld p enemies) = MkWorld (updatePlayer dt p) (updateEnemies 
 
 
 createEnemie :: (Float,Float) -> (Float,Float) -> Int -> Enemie
-createEnemie coord vel 1 = MkBigEnemie (color red $ circleSolid 25) coord vel 30
-createEnemie coord vel 0 = MkMiniEnemie (color blue $ circleSolid 10) coord vel
-createEnemie coord vel _ = MkMiniEnemie (color blue $ circleSolid 10) coord vel
+createEnemie coord vel 1 = MkBigEnemie  (getShipFormat red  180 1.2 1.2) coord vel 30
+createEnemie coord vel 0 = MkMiniEnemie (getShipFormat blue 180 0.8 0.8) coord vel
+createEnemie coord vel _ = MkMiniEnemie (getShipFormat blue 180 0.8 0.8) coord vel
 
 createEnemies :: StdGen -> Int -> [Enemie]
 createEnemies g n = take n $ zipWith3 createEnemie coords vels tps 
@@ -111,23 +111,53 @@ createEnemies g n = take n $ zipWith3 createEnemie coords vels tps
         --cores = cycle [red,black,yellow,blue,green]
 
 
-moveThePlayer :: Float -> Player -> Player
-moveThePlayer mv (MkPlayer p (x,y) v) = MkPlayer p (x + mv,y) v
+moveThePlayer :: Float -> Float -> Float -> Player -> Player
+moveThePlayer xPos yPos mv (MkPlayer p (x,y) v) = MkPlayer newPic (newX,y) v
+    where
+        newX = x + mv
+        aTang = atan ((xPos - newX)/(yPos - y))
+        angDegree = (180/pi) * aTang
+        newPic = getPlayerShip angDegree
+
 
 inputHandler :: Event -> World -> World
-inputHandler (EventKey (SpecialKey KeyUp) Down _ _) (MkWorld p enemies) = MkWorld p enemies
-inputHandler (EventKey (SpecialKey KeyDown) Down _ _) (MkWorld p enemies) = MkWorld p enemies
-inputHandler (EventKey (SpecialKey KeyRight) Down _ _) (MkWorld p enemies) = MkWorld (moveThePlayer 10 p) enemies
-inputHandler (EventKey (SpecialKey KeyLeft) Down _ _) (MkWorld p enemies) = MkWorld (moveThePlayer (-10) p) enemies
+inputHandler (EventKey (SpecialKey keyPressed) Down _ (xPos,yPos)) (MkWorld p enemies) = 
+    case (keyPressed) of
+        KeyRight -> MkWorld (moveThePlayer xPos yPos 10 p) enemies
+        KeyLeft  -> MkWorld (moveThePlayer xPos yPos (-10) p) enemies
+        _ -> MkWorld (moveThePlayer xPos yPos 0 p) enemies
+inputHandler (EventMotion (xPos,yPos)) (MkWorld p enemies) = MkWorld (moveThePlayer xPos yPos 0 p) enemies
 inputHandler _ w = w
+
+
+
+
+getShipFormat :: Color -> Float -> Float -> Float -> Picture
+getShipFormat c r x y = scale x y (color c (rotate r ship))
+    where 
+        ship = polygon [
+            (  0,  50),
+            ( 40,  20),
+            ( 20,   0),
+            ( 30, -30),
+            (  0, -10),
+            (-30, -30),
+            (-20,   0),
+            (-40,  20),
+            (  0,  50)
+            ]
+
+getPlayerShip :: Float -> Picture
+getPlayerShip ang = getShipFormat green ang 0.75 0.75
+
 
 main :: IO()
 main = do 
     g <- getStdGen
     let displayWindow = InWindow "Enemies atack" (2 * limiteX, 2 * limiteY) (50, 50)
         simulationRate = 60
-        enemies = createEnemies g  5 
-        player = MkPlayer (color green $ circleSolid 15) (0,-40) (0,0)
+        enemies = createEnemies g  5
+        player = MkPlayer (getPlayerShip 0) (0,-80) (0,0)
         initWorld = MkWorld player enemies
         
     play
