@@ -7,15 +7,22 @@ import System.Random
 type Coord = (Float,Float)
 type Life = Float
 type Vel = (Float,Float)
-
+type ShowObj = Bool
 
 data Enemie = MkBigEnemie Picture Coord Vel Life | MkMiniEnemie Picture Coord Vel
 data Player = MkPlayer Picture Coord Vel
-data World  = MkWorld Player [Enemie]
+data Shot   = MkShot Picture Coord Vel ShowObj
+data World  = MkWorld Player [Enemie] [Shot]
 
 limiteX, limiteY :: Num a => a
 limiteX = 400
 limiteY = 300
+
+drawShot:: Shot -> Picture
+drawShot (MkShot p (x,y) v so) = translate x y p
+
+drawingShots :: [Shot] -> Picture
+drawingShots shots = pictures (map drawShot shots)
 
 drawEnemie:: Enemie -> Picture
 drawEnemie (MkBigEnemie p (x,y) v l) = translate x y p
@@ -29,25 +36,42 @@ drawingPlayer :: Player -> Picture
 drawingPlayer (MkPlayer p (x,y) v)= translate x y p
 
 drawingWorld :: World -> Picture
-drawingWorld (MkWorld p enemies) = pictures [pic_p, pic_enemies]
+drawingWorld (MkWorld p enemies shots) = pictures [pic_p, pic_enemies, pic_shots]
     where
         pic_p = drawingPlayer p
         pic_enemies = drawingEnemies enemies
+        pic_shots = drawingShots shots
+
+updatePosShot :: Float -> Shot -> Shot
+updatePosShot dt (MkShot p (x,y) (vx,vy) so) = MkShot p (x + vx*dt,y + vy*dt) (vx,vy) so
+
+updateShowShot ::  Shot -> Shot
+updateShowShot (MkShot p (x,y) v so)
+    | x > limiteX || x < -limiteX || y > limiteY || y < -limiteY = MkShot p (x,y) v False
+    | otherwise = MkShot p (x,y) v True
+
+shotNeedShow :: Shot -> Bool
+shotNeedShow (MkShot p (x,y) v so) = so
+
+updateShots :: Float -> [Shot] -> [Shot]
+updateShots dt shots = newShotsFiltered
+    where 
+        newShots = map (updateShowShot . updatePosShot dt) shots 
+        newShotsFiltered = [shot | shot <- newShots, shotNeedShow shot]
 
 
+updatePosEnemie :: Float -> Enemie -> Enemie
+updatePosEnemie dt (MkBigEnemie p (x,y) (vx,vy) l) = MkBigEnemie p (x + vx*dt,y + vy*dt) (vx,vy) l
+updatePosEnemie dt (MkMiniEnemie p (x,y) (vx,vy))  = MkMiniEnemie p (x + vx*dt,y + vy*dt) (vx,vy)
 
-updatePos :: Float -> Enemie -> Enemie
-updatePos dt (MkBigEnemie p (x,y) (vx,vy) l) = MkBigEnemie p (x + vx*dt,y + vy*dt) (vx,vy) l
-updatePos dt (MkMiniEnemie p (x,y) (vx,vy))  = MkMiniEnemie p (x + vx*dt,y + vy*dt) (vx,vy)
-
-updateVel ::  Enemie -> Enemie
-updateVel (MkBigEnemie p (x,y) (vx,vy) l)
+updateVelEnemie ::  Enemie -> Enemie
+updateVelEnemie (MkBigEnemie p (x,y) (vx,vy) l)
     | x > limiteX  = MkBigEnemie p (limiteX,y) (-vx,vy) l
     | x < -limiteX = MkBigEnemie p (-limiteX,y) (-vx,vy) l
     | y > limiteY =  MkBigEnemie p (x,limiteY) (vx,-vy) l
     | y < -limiteY = MkBigEnemie p (x,-limiteY) (vx,-vy) l
     | otherwise  = MkBigEnemie p (x,y) (vx,vy) l
-updateVel (MkMiniEnemie p (x,y) (vx,vy))
+updateVelEnemie (MkMiniEnemie p (x,y) (vx,vy))
     | x > limiteX  = MkMiniEnemie p (limiteX,y) (-vx,vy) 
     | x < -limiteX = MkMiniEnemie p (-limiteX,y) (-vx,vy) 
     | y > limiteY =  MkMiniEnemie p (x,limiteY) (vx,-vy) 
@@ -58,7 +82,7 @@ updateVel (MkMiniEnemie p (x,y) (vx,vy))
 
 
 updateEnemies :: Float -> [Enemie] -> [Enemie]
-updateEnemies dt enemies = map (updateVel . updatePos dt) enemies 
+updateEnemies dt enemies = map (updateVelEnemie . updatePosEnemie dt) enemies 
 
 
 
@@ -71,7 +95,7 @@ updatePlayer _ (MkPlayer p (x,y) v)
     | otherwise  = MkPlayer p (x,y) v
 
 updateWorld :: Float ->  World -> World
-updateWorld dt (MkWorld p enemies) = MkWorld (updatePlayer dt p) (updateEnemies dt enemies)
+updateWorld dt (MkWorld p enemies shots) = MkWorld (updatePlayer dt p) (updateEnemies dt enemies) (updateShots dt shots)
 
 
 
@@ -111,22 +135,49 @@ createEnemies g n = take n $ zipWith3 createEnemie coords vels tps
         --cores = cycle [red,black,yellow,blue,green]
 
 
+getMouseAng ::  Coord -> Coord -> Float
+getMouseAng (xPos,yPos) (pX,pY) = aTang
+    where
+        aTang = atan ((xPos - pX)/(yPos - pY))
+
+
+getMouseAngDegree ::  Coord -> Coord -> Float
+getMouseAngDegree (xPos,yPos) (pX,pY) = angDegree
+    where
+        aTang = getMouseAng (xPos,yPos) (pX,pY)
+        angDegree = (180/pi) * aTang
+
 moveThePlayer :: Float -> Float -> Float -> Player -> Player
 moveThePlayer xPos yPos mv (MkPlayer p (x,y) v) = MkPlayer newPic (newX,y) v
     where
         newX = x + mv
-        aTang = atan ((xPos - newX)/(yPos - y))
-        angDegree = (180/pi) * aTang
-        newPic = getPlayerShip angDegree
+        angDegree = getMouseAngDegree (xPos,yPos) (newX,y)
+        adjustedAng
+            | angDegree > 45  = 45
+            | angDegree < -45 = -45
+            | otherwise = angDegree
+        newPic = getPlayerShip adjustedAng
 
+getShotFormat :: Picture
+getShotFormat = color white (circleSolid 5)
+
+addShot :: Player -> Coord -> [Shot] -> [Shot]
+addShot (MkPlayer p (x,y) v) (xPos,yPos)  shots = shots ++ [newShot]
+    where
+        baseVel = 100
+        angDegree = getMouseAng (xPos,yPos) (x,y)
+        xv = baseVel * (sin angDegree)
+        yv = baseVel * (cos angDegree)
+        newShot = MkShot getShotFormat (x,y+30) (xv,yv) True
 
 inputHandler :: Event -> World -> World
-inputHandler (EventKey (SpecialKey keyPressed) Down _ (xPos,yPos)) (MkWorld p enemies) = 
+inputHandler (EventKey (SpecialKey keyPressed) Down _ (xPos,yPos)) (MkWorld p enemies shots) = 
     case (keyPressed) of
-        KeyRight -> MkWorld (moveThePlayer xPos yPos 10 p) enemies
-        KeyLeft  -> MkWorld (moveThePlayer xPos yPos (-10) p) enemies
-        _ -> MkWorld (moveThePlayer xPos yPos 0 p) enemies
-inputHandler (EventMotion (xPos,yPos)) (MkWorld p enemies) = MkWorld (moveThePlayer xPos yPos 0 p) enemies
+        KeyRight -> MkWorld (moveThePlayer xPos yPos 10 p) enemies shots
+        KeyLeft  -> MkWorld (moveThePlayer xPos yPos (-10) p) enemies shots
+        KeySpace -> MkWorld (moveThePlayer xPos yPos 0 p) enemies (addShot p (xPos,yPos) shots)
+        _ -> MkWorld (moveThePlayer xPos yPos 0 p) enemies shots
+inputHandler (EventMotion (xPos,yPos)) (MkWorld p enemies shots) = MkWorld (moveThePlayer xPos yPos 0 p) enemies shots
 inputHandler _ w = w
 
 
@@ -158,11 +209,11 @@ main = do
         simulationRate = 60
         enemies = createEnemies g  5
         player = MkPlayer (getPlayerShip 0) (0,-80) (0,0)
-        initWorld = MkWorld player enemies
+        initWorld = MkWorld player enemies []
         
     play
        displayWindow
-       white
+       black
        simulationRate
        initWorld
        drawingWorld
