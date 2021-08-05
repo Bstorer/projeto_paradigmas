@@ -9,7 +9,7 @@ type Life = Float
 type Vel = (Float,Float)
 type ShowObj = Bool
 
-data Enemie = MkBigEnemie Picture Coord Vel Life | MkMiniEnemie Picture Coord Vel
+data Enemie = MkBigEnemie Picture Coord Vel ShowObj Life | MkMiniEnemie Picture Coord Vel ShowObj
 data Player = MkPlayer Picture Coord Vel
 data Shot   = MkShot Picture Coord Vel ShowObj
 data World  = MkWorld Player [Enemie] [Shot]
@@ -25,8 +25,8 @@ drawingShots :: [Shot] -> Picture
 drawingShots shots = pictures (map drawShot shots)
 
 drawEnemie:: Enemie -> Picture
-drawEnemie (MkBigEnemie p (x,y) v l) = translate x y p
-drawEnemie (MkMiniEnemie p (x,y) v) = translate x y p
+drawEnemie (MkBigEnemie p (x,y) v so l) = translate x y p
+drawEnemie (MkMiniEnemie p (x,y) v so) = translate x y p
 
 drawingEnemies :: [Enemie] -> Picture
 drawingEnemies enemies = pictures (map drawEnemie enemies)
@@ -61,28 +61,63 @@ updateShots dt shots = newShotsFiltered
 
 
 updatePosEnemie :: Float -> Enemie -> Enemie
-updatePosEnemie dt (MkBigEnemie p (x,y) (vx,vy) l) = MkBigEnemie p (x + vx*dt,y + vy*dt) (vx,vy) l
-updatePosEnemie dt (MkMiniEnemie p (x,y) (vx,vy))  = MkMiniEnemie p (x + vx*dt,y + vy*dt) (vx,vy)
+updatePosEnemie dt (MkBigEnemie p (x,y) (vx,vy) so l) = MkBigEnemie p (x + vx*dt,y + vy*dt) (vx,vy) so l
+updatePosEnemie dt (MkMiniEnemie p (x,y) (vx,vy) so)  = MkMiniEnemie p (x + vx*dt,y + vy*dt) (vx,vy) so
 
 updateVelEnemie ::  Enemie -> Enemie
-updateVelEnemie (MkBigEnemie p (x,y) (vx,vy) l)
-    | x > limiteX  = MkBigEnemie p (limiteX,y) (-vx,vy) l
-    | x < -limiteX = MkBigEnemie p (-limiteX,y) (-vx,vy) l
-    | y > limiteY =  MkBigEnemie p (x,limiteY) (vx,-vy) l
-    | y < -limiteY = MkBigEnemie p (x,-limiteY) (vx,-vy) l
-    | otherwise  = MkBigEnemie p (x,y) (vx,vy) l
-updateVelEnemie (MkMiniEnemie p (x,y) (vx,vy))
-    | x > limiteX  = MkMiniEnemie p (limiteX,y) (-vx,vy) 
-    | x < -limiteX = MkMiniEnemie p (-limiteX,y) (-vx,vy) 
-    | y > limiteY =  MkMiniEnemie p (x,limiteY) (vx,-vy) 
-    | y < -limiteY = MkMiniEnemie p (x,-limiteY) (vx,-vy) 
-    | otherwise  = MkMiniEnemie p (x,y) (vx,vy) 
+updateVelEnemie (MkBigEnemie p (x,y) (vx,vy) so l)
+    | x > limiteX  = MkBigEnemie p (limiteX,y) (-vx,vy) so l
+    | x < -limiteX = MkBigEnemie p (-limiteX,y) (-vx,vy) so l
+    | y > limiteY =  MkBigEnemie p (x,limiteY) (vx,-vy) so l
+    | y < -limiteY = MkBigEnemie p (x,-limiteY) (vx,-vy) so l
+    | otherwise  = MkBigEnemie p (x,y) (vx,vy) so l
+updateVelEnemie (MkMiniEnemie p (x,y) (vx,vy) so)
+    | x > limiteX  = MkMiniEnemie p (limiteX,y) (-vx,vy) so
+    | x < -limiteX = MkMiniEnemie p (-limiteX,y) (-vx,vy) so 
+    | y > limiteY =  MkMiniEnemie p (x,limiteY) (vx,-vy) so 
+    | y < -limiteY = MkMiniEnemie p (x,-limiteY) (vx,-vy) so 
+    | otherwise  = MkMiniEnemie p (x,y) (vx,vy) so 
 
 
 
+verifyShotEnemie :: Shot -> Enemie -> Bool
+verifyShotEnemie (MkShot sp (sx,sy) sv sso)  (MkBigEnemie ep (ex,ey) ev eso l) = getShot
+    where 
+        dist = sqrt ((sx - ex)*(sx - ex) + (sy - ey)*(sy - ey))
+        getShot 
+            | dist <= 50 = True 
+            | otherwise = False
+verifyShotEnemie (MkShot sp (sx,sy) sv sso)  (MkMiniEnemie ep (ex,ey) ev eso) = getShot
+    where 
+        dist = sqrt ((sx - ex)*(sx - ex) + (sy - ey)*(sy - ey))
+        getShot 
+            | dist <= 40 = True 
+            | otherwise = False
 
-updateEnemies :: Float -> [Enemie] -> [Enemie]
-updateEnemies dt enemies = map (updateVelEnemie . updatePosEnemie dt) enemies 
+updateEnemieShow :: Int -> Enemie -> Enemie
+updateEnemieShow  nShots (MkBigEnemie p (x,y) v so l)
+    | nShots <= 0 = MkBigEnemie p (x,y) v so l
+    | otherwise = MkBigEnemie p (x,y) v False l
+updateEnemieShow  nShots (MkMiniEnemie p (x,y) v so)
+    | nShots <= 0 = MkMiniEnemie p (x,y) v so 
+    | otherwise = MkMiniEnemie p (x,y) v False 
+
+shotsEnemiesInteraction ::  [Shot] -> Enemie -> Enemie
+shotsEnemiesInteraction shots enemie = enemieAfterShot
+    where
+        shotsThatHitEnemie = [shot | shot <- shots, verifyShotEnemie shot enemie]
+        nShots = length shotsThatHitEnemie
+        enemieAfterShot = updateEnemieShow nShots enemie
+
+enemieNeedShow :: Enemie -> Bool
+enemieNeedShow (MkBigEnemie p (x,y) v so l) = so
+enemieNeedShow (MkMiniEnemie p (x,y) v so) = so
+
+updateEnemies :: Float -> [Enemie] -> [Shot] -> [Enemie]
+updateEnemies dt enemies shots = map (updateVelEnemie . updatePosEnemie dt) enemiesToShow
+    where
+        enemiesAfterShots = map (shotsEnemiesInteraction shots) enemies
+        enemiesToShow = [enemie | enemie <- enemiesAfterShots, enemieNeedShow enemie]
 
 
 
@@ -95,14 +130,14 @@ updatePlayer _ (MkPlayer p (x,y) v)
     | otherwise  = MkPlayer p (x,y) v
 
 updateWorld :: Float ->  World -> World
-updateWorld dt (MkWorld p enemies shots) = MkWorld (updatePlayer dt p) (updateEnemies dt enemies) (updateShots dt shots)
+updateWorld dt (MkWorld p enemies shots) = MkWorld (updatePlayer dt p) (updateEnemies dt enemies shots) (updateShots dt shots)
 
 
 
 createEnemie :: (Float,Float) -> (Float,Float) -> Int -> Enemie
-createEnemie coord vel 1 = MkBigEnemie  (getShipFormat red  180 1.2 1.2) coord vel 30
-createEnemie coord vel 0 = MkMiniEnemie (getShipFormat blue 180 0.8 0.8) coord vel
-createEnemie coord vel _ = MkMiniEnemie (getShipFormat blue 180 0.8 0.8) coord vel
+createEnemie coord vel 1 = MkBigEnemie  (getShipFormat red  180 1.2 1.2) coord vel True 30
+createEnemie coord vel 0 = MkMiniEnemie (getShipFormat blue 180 0.8 0.8) coord vel True
+createEnemie coord vel _ = MkMiniEnemie (getShipFormat blue 180 0.8 0.8) coord vel True
 
 createEnemies :: StdGen -> Int -> [Enemie]
 createEnemies g n = take n $ zipWith3 createEnemie coords vels tps 
