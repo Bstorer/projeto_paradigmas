@@ -25,8 +25,16 @@ drawingShots :: [Shot] -> Picture
 drawingShots shots = pictures (map drawShot shots)
 
 drawEnemie:: Enemie -> Picture
-drawEnemie (MkBigEnemie p (x,y) v so l) = translate x y p
+drawEnemie (MkBigEnemie p (x,y) v so l) =  translate x y (getEnemieShip enemieColor 1.2)
+    where 
+        enemieColor
+           | l >= 30 = green--makeColor 82 4 161 1
+           | l >= 20 = yellow --makeColor 6 3 98 1
+           | l >= 10 = red --makeColor 55 3 98 1
+           | otherwise = white
+        
 drawEnemie (MkMiniEnemie p (x,y) v so) = translate x y p
+
 
 drawingEnemies :: [Enemie] -> Picture
 drawingEnemies enemies = pictures (map drawEnemie enemies)
@@ -53,6 +61,11 @@ updateShowShot (MkShot p (x,y) v so)
 shotNeedShow :: Shot -> Bool
 shotNeedShow (MkShot p (x,y) v so) = so
 
+enemieNeedShow :: Enemie -> Bool
+enemieNeedShow (MkBigEnemie p (x,y) v so l) = so
+enemieNeedShow (MkMiniEnemie p (x,y) v so) = so
+
+
 updateShots :: Float -> [Shot] -> [Shot]
 updateShots dt shots = newShotsFiltered
     where 
@@ -78,7 +91,8 @@ updateVelEnemie (MkMiniEnemie p (x,y) (vx,vy) so)
     | y < -limiteY = MkMiniEnemie p (x,-limiteY) (vx,-vy) so 
     | otherwise  = MkMiniEnemie p (x,y) (vx,vy) so 
 
-
+updateEnemies :: Float -> [Enemie] -> [Enemie]
+updateEnemies dt enemies = map (updateVelEnemie . updatePosEnemie dt) enemies
 
 verifyShotEnemie :: Shot -> Enemie -> Bool
 verifyShotEnemie (MkShot sp (sx,sy) sv sso)  (MkBigEnemie ep (ex,ey) ev eso l) = getShot
@@ -96,10 +110,11 @@ verifyShotEnemie (MkShot sp (sx,sy) sv sso)  (MkMiniEnemie ep (ex,ey) ev eso) = 
 
 updateEnemieShow :: Int -> Enemie -> Enemie
 updateEnemieShow  nShots (MkBigEnemie p (x,y) v so l)
-    | nShots <= 0 = MkBigEnemie p (x,y) v so l
-    | otherwise = MkBigEnemie p (x,y) v False l
+    | nShots <= 0 = MkBigEnemie p (x,y) v True l
+    | l - 10 > 0 = MkBigEnemie p (x,y) v True (l - 10)
+    | otherwise = MkBigEnemie p (x,y) v False 0
 updateEnemieShow  nShots (MkMiniEnemie p (x,y) v so)
-    | nShots <= 0 = MkMiniEnemie p (x,y) v so 
+    | nShots <= 0 = MkMiniEnemie p (x,y) v True 
     | otherwise = MkMiniEnemie p (x,y) v False 
 
 shotsEnemiesInteraction ::  [Shot] -> Enemie -> Enemie
@@ -109,15 +124,27 @@ shotsEnemiesInteraction shots enemie = enemieAfterShot
         nShots = length shotsThatHitEnemie
         enemieAfterShot = updateEnemieShow nShots enemie
 
-enemieNeedShow :: Enemie -> Bool
-enemieNeedShow (MkBigEnemie p (x,y) v so l) = so
-enemieNeedShow (MkMiniEnemie p (x,y) v so) = so
+updateShotShow :: Int -> Shot -> Shot
+updateShotShow  nEnemies (MkShot p (x,y) v so)
+    | nEnemies <= 0 = MkShot p (x,y) v True 
+    | otherwise = MkShot p (x,y) v False 
 
-updateEnemies :: Float -> [Enemie] -> [Shot] -> [Enemie]
-updateEnemies dt enemies shots = map (updateVelEnemie . updatePosEnemie dt) enemiesToShow
+enemiesShotsInteraction:: [Enemie] -> Shot -> Shot
+enemiesShotsInteraction enemies shot = shotAfterEnemie
+    where
+        shotsEnemiesGotHit = [enemie | enemie <- enemies, verifyShotEnemie shot enemie]
+        nEnemies = length shotsEnemiesGotHit
+        shotAfterEnemie = updateShotShow nEnemies shot
+
+updateEnemiesAndShots :: Float -> [Enemie] -> [Shot] -> ([Enemie],[Shot])
+updateEnemiesAndShots dt enemies shots = (enimesUpdated,shotsUpdated)
     where
         enemiesAfterShots = map (shotsEnemiesInteraction shots) enemies
         enemiesToShow = [enemie | enemie <- enemiesAfterShots, enemieNeedShow enemie]
+        enimesUpdated = updateEnemies dt enemiesToShow
+        shotsAfterEnemies = map (enemiesShotsInteraction enemies) shots
+        shotsToShow = [shot | shot <- shotsAfterEnemies, shotNeedShow shot]
+        shotsUpdated = updateShots dt shotsToShow
 
 
 
@@ -129,15 +156,26 @@ updatePlayer _ (MkPlayer p (x,y) v)
     | y < -limiteY = MkPlayer p (x,-limiteY) v 
     | otherwise  = MkPlayer p (x,y) v
 
+getEnemiesFromTuple :: ([Enemie],[Shot]) -> [Enemie]
+getEnemiesFromTuple (enemies,shots) = enemies 
+
+getShotsFromTuple :: ([Enemie],[Shot]) -> [Shot]
+getShotsFromTuple (enemies,shots) = shots
+
 updateWorld :: Float ->  World -> World
-updateWorld dt (MkWorld p enemies shots) = MkWorld (updatePlayer dt p) (updateEnemies dt enemies shots) (updateShots dt shots)
+updateWorld dt (MkWorld p enemies shots) = MkWorld (updatePlayer dt p) enemiesUpdated shotsUpdated
+    where
+        enemiesAndShotsUpdated = updateEnemiesAndShots dt enemies shots
+        enemiesUpdated = getEnemiesFromTuple enemiesAndShotsUpdated
+        shotsUpdated = getShotsFromTuple enemiesAndShotsUpdated
 
-
+getEnemieShip:: Color -> Float -> Picture
+getEnemieShip c scale = getShipFormat c 180 scale scale
 
 createEnemie :: (Float,Float) -> (Float,Float) -> Int -> Enemie
-createEnemie coord vel 1 = MkBigEnemie  (getShipFormat red  180 1.2 1.2) coord vel True 30
-createEnemie coord vel 0 = MkMiniEnemie (getShipFormat blue 180 0.8 0.8) coord vel True
-createEnemie coord vel _ = MkMiniEnemie (getShipFormat blue 180 0.8 0.8) coord vel True
+createEnemie coord vel 1  = MkBigEnemie  (getEnemieShip red 1.2) coord vel True 30
+createEnemie coord vel 0  = MkMiniEnemie (getEnemieShip blue 0.8) coord vel True
+createEnemie coord vel _  = MkMiniEnemie (getEnemieShip blue 0.8) coord vel True
 
 createEnemies :: StdGen -> Int -> [Enemie]
 createEnemies g n = take n $ zipWith3 createEnemie coords vels tps 
