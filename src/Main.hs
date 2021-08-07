@@ -3,16 +3,19 @@ import Graphics.Gloss
 import Graphics.Gloss.Interface.Pure.Game
 import System.Random
 
-
 type Coord = (Float,Float)
 type Life = Float
 type Vel = (Float,Float)
 type ShowObj = Bool
+type GameScore = Int
+type Time = Int
 
+
+data Game = MkGame Time GameScore 
 data Enemie = MkBigEnemie Picture Coord Vel ShowObj Life | MkMiniEnemie Picture Coord Vel ShowObj
 data Player = MkPlayer Picture Coord Vel
-data Shot   = MkShot Picture Coord Vel ShowObj
-data World  = MkWorld Player [Enemie] [Shot]
+data Shot   = MkShot Picture Coord Vel ShowObj deriving Eq
+data World  = MkWorld Game Player [Enemie] [Shot]
 
 limiteX, limiteY :: Num a => a
 limiteX = 400
@@ -43,12 +46,24 @@ drawingEnemies enemies = pictures (map drawEnemie enemies)
 drawingPlayer :: Player -> Picture 
 drawingPlayer (MkPlayer p (x,y) v)= translate x y p
 
-drawingWorld :: World -> Picture
-drawingWorld (MkWorld p enemies shots) = pictures [pic_p, pic_enemies, pic_shots]
+drawingWorld :: StdGen ->  World -> Picture
+drawingWorld g (MkWorld game p enemies shots) = pictures [pic_p, pic_enemies, pic_shots,textPoints]
     where
         pic_p = drawingPlayer p
         pic_enemies = drawingEnemies enemies
         pic_shots = drawingShots shots
+        points = show (getGamePoints game)
+        testX::Picture
+        testX = (color white (text "Pontos: "))
+        textPoints::Picture
+        textPoints = translate x y  (scale s s (color white (text ("Pontos: " ++ points))))
+            where
+                x::Float
+                y::Float 
+                x = -400
+                y = 250
+                s = 0.3
+
 
 updatePosShot :: Float -> Shot -> Shot
 updatePosShot dt (MkShot p (x,y) (vx,vy) so) = MkShot p (x + vx*dt,y + vy*dt) (vx,vy) so
@@ -81,13 +96,11 @@ updateVelEnemie ::  Enemie -> Enemie
 updateVelEnemie (MkBigEnemie p (x,y) (vx,vy) so l)
     | x > limiteX  = MkBigEnemie p (limiteX,y) (-vx,vy) so l
     | x < -limiteX = MkBigEnemie p (-limiteX,y) (-vx,vy) so l
-    | y > limiteY =  MkBigEnemie p (x,limiteY) (vx,-vy) so l
     | y < -limiteY = MkBigEnemie p (x,-limiteY) (vx,-vy) so l
     | otherwise  = MkBigEnemie p (x,y) (vx,vy) so l
 updateVelEnemie (MkMiniEnemie p (x,y) (vx,vy) so)
     | x > limiteX  = MkMiniEnemie p (limiteX,y) (-vx,vy) so
     | x < -limiteX = MkMiniEnemie p (-limiteX,y) (-vx,vy) so 
-    | y > limiteY =  MkMiniEnemie p (x,limiteY) (vx,-vy) so 
     | y < -limiteY = MkMiniEnemie p (x,-limiteY) (vx,-vy) so 
     | otherwise  = MkMiniEnemie p (x,y) (vx,vy) so 
 
@@ -129,6 +142,11 @@ updateShotShow  nEnemies (MkShot p (x,y) v so)
     | nEnemies <= 0 = MkShot p (x,y) v True 
     | otherwise = MkShot p (x,y) v False 
 
+
+getEnemieType :: Enemie -> Int
+getEnemieType  (MkBigEnemie p (x,y) v so l) = 1
+getEnemieType  (MkMiniEnemie p (x,y) v so) = 0
+
 enemiesShotsInteraction:: [Enemie] -> Shot -> Shot
 enemiesShotsInteraction enemies shot = shotAfterEnemie
     where
@@ -136,15 +154,31 @@ enemiesShotsInteraction enemies shot = shotAfterEnemie
         nEnemies = length shotsEnemiesGotHit
         shotAfterEnemie = updateShotShow nEnemies shot
 
-updateEnemiesAndShots :: Float -> [Enemie] -> [Shot] -> ([Enemie],[Shot])
-updateEnemiesAndShots dt enemies shots = (enimesUpdated,shotsUpdated)
+-- separeteShotsAndPoints :: [(Shot,Int)] -> ([Shot],Int)
+-- separeteShotsAndPoints shotsPoints
+--     | shotsPoints == [] = ([],0)
+--     | otherwise = ([shot] ++ shotsTail, points + pointsTail)
+--         where
+--             (shot,points) = head shotsPoints
+--             (shotsTail,pointsTail) = separeteShotsAndPoints (tail shotsPoints)
+
+updateEnemiesShotsGame :: Float -> Game -> [Enemie] -> [Shot] -> (Game,[Enemie],[Shot])
+updateEnemiesShotsGame dt game enemies shots = (gameUpdated,enemiesUpdated,shotsUpdated)
     where
         enemiesAfterShots = map (shotsEnemiesInteraction shots) enemies
         enemiesToShow = [enemie | enemie <- enemiesAfterShots, enemieNeedShow enemie]
-        enimesUpdated = updateEnemies dt enemiesToShow
+        enemiesUpdated = updateEnemies dt enemiesToShow
+
         shotsAfterEnemies = map (enemiesShotsInteraction enemies) shots
         shotsToShow = [shot | shot <- shotsAfterEnemies, shotNeedShow shot]
         shotsUpdated = updateShots dt shotsToShow
+
+        enemiesToNotShow = [enemie | enemie <- enemiesAfterShots, not (enemieNeedShow enemie)]
+        nMiniEnemiesHit = length [enemie | enemie <- enemiesToNotShow, (getEnemieType enemie) == 0]
+        nBigEnemiesHit = length [enemie | enemie <- enemiesToNotShow, (getEnemieType enemie) == 1]
+        pointsGot = 20*nBigEnemiesHit + 10*nMiniEnemiesHit
+
+        gameUpdated = updateGame game pointsGot
 
 
 
@@ -162,12 +196,45 @@ getEnemiesFromTuple (enemies,shots) = enemies
 getShotsFromTuple :: ([Enemie],[Shot]) -> [Shot]
 getShotsFromTuple (enemies,shots) = shots
 
-updateWorld :: Float ->  World -> World
-updateWorld dt (MkWorld p enemies shots) = MkWorld (updatePlayer dt p) enemiesUpdated shotsUpdated
+updateGame :: Game -> Int -> Game
+updateGame (MkGame time points) pointsGot = MkGame (time + 1) (points + pointsGot)
+
+sigmoid :: Float -> Float
+sigmoid x = 1/(1 + (2.718)**(-x))
+
+
+getNewEnemie :: StdGen -> Time -> [Enemie]
+getNewEnemie g time = newEnemie
+    where 
+        (gT,gPV) = split g
+        (gP,gV) = split gPV
+        xP = limiteX - 2*(limiteX * ((randomRs (0::Float,1::Float) gP)!!time))
+        yV = (-200) * ((randomRs (0::Float,1::Float) gV)!!time)
+        coord = (xP,360)
+        vel = (0,yV)
+        enemType :: Float
+        enemType = ((randomRs (0::Float,1::Float) gT)!!time)
+        factor = (log (fromIntegral (100*time) :: Float))
+        newEnemie
+            | enemType <= 0.0005 * factor = [createEnemie coord vel 1] 
+            | enemType <= 0.001 * factor = [createEnemie coord vel 0]
+            | otherwise = []
+
+getGameTime :: Game -> Time 
+getGameTime (MkGame time points) = time
+
+getGamePoints :: Game -> GameScore 
+getGamePoints (MkGame time points) = points
+
+
+updateWorld :: StdGen -> Float ->  World -> World
+updateWorld g dt (MkWorld game p enemies shots) = MkWorld gameUpdated (updatePlayer dt p) enemiesAll shotsUpdated
     where
-        enemiesAndShotsUpdated = updateEnemiesAndShots dt enemies shots
-        enemiesUpdated = getEnemiesFromTuple enemiesAndShotsUpdated
-        shotsUpdated = getShotsFromTuple enemiesAndShotsUpdated
+        (gameUpdated,enemiesUpdated,shotsUpdated) = updateEnemiesShotsGame dt game enemies shots
+        time = getGameTime gameUpdated
+        newEnemie = getNewEnemie g time
+        enemiesAll = enemiesUpdated ++ newEnemie
+        
 
 getEnemieShip:: Color -> Float -> Picture
 getEnemieShip c scale = getShipFormat c 180 scale scale
@@ -237,20 +304,24 @@ getShotFormat = color white (circleSolid 5)
 addShot :: Player -> Coord -> [Shot] -> [Shot]
 addShot (MkPlayer p (x,y) v) (xPos,yPos)  shots = shots ++ [newShot]
     where
-        baseVel = 100
+        baseVel = 300
         angDegree = getMouseAng (xPos,yPos) (x,y)
-        xv = baseVel * (sin angDegree)
-        yv = baseVel * (cos angDegree)
+        adjustedAng
+            | angDegree > 0.785398  = 0.785398 
+            | angDegree < -0.785398  = -0.785398 
+            | otherwise = angDegree
+        xv = baseVel * (sin adjustedAng)
+        yv = baseVel * (cos adjustedAng)
         newShot = MkShot getShotFormat (x,y+30) (xv,yv) True
 
 inputHandler :: Event -> World -> World
-inputHandler (EventKey (SpecialKey keyPressed) Down _ (xPos,yPos)) (MkWorld p enemies shots) = 
+inputHandler (EventKey (SpecialKey keyPressed) Down _ (xPos,yPos)) (MkWorld game p enemies shots) = 
     case (keyPressed) of
-        KeyRight -> MkWorld (moveThePlayer xPos yPos 10 p) enemies shots
-        KeyLeft  -> MkWorld (moveThePlayer xPos yPos (-10) p) enemies shots
-        KeySpace -> MkWorld (moveThePlayer xPos yPos 0 p) enemies (addShot p (xPos,yPos) shots)
-        _ -> MkWorld (moveThePlayer xPos yPos 0 p) enemies shots
-inputHandler (EventMotion (xPos,yPos)) (MkWorld p enemies shots) = MkWorld (moveThePlayer xPos yPos 0 p) enemies shots
+        KeyRight -> MkWorld game (moveThePlayer xPos yPos 30 p) enemies shots
+        KeyLeft  -> MkWorld game (moveThePlayer xPos yPos (-30) p) enemies shots
+        KeySpace -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies (addShot p (xPos,yPos) shots)
+        _ -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies shots
+inputHandler (EventMotion (xPos,yPos)) (MkWorld game p enemies shots) = MkWorld game (moveThePlayer xPos yPos 0 p) enemies shots
 inputHandler _ w = w
 
 
@@ -280,18 +351,18 @@ main = do
     g <- getStdGen
     let displayWindow = InWindow "Enemies atack" (2 * limiteX, 2 * limiteY) (50, 50)
         simulationRate = 60
-        enemies = createEnemies g  5
-        player = MkPlayer (getPlayerShip 0) (0,-80) (0,0)
-        initWorld = MkWorld player enemies []
+        player = MkPlayer (getPlayerShip 0) (0,-230) (0,0)
+        game = MkGame 0 0 
+        initWorld = MkWorld game player [] []
         
     play
        displayWindow
        black
        simulationRate
        initWorld
-       drawingWorld
+       (drawingWorld g)
        inputHandler
-       updateWorld
+       (updateWorld g)
    
         
 
