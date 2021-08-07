@@ -9,9 +9,10 @@ type Vel = (Float,Float)
 type ShowObj = Bool
 type GameScore = Int
 type Time = Int
+type Status = Bool
 
 
-data Game = MkGame Time GameScore 
+data Game = MkGame Time GameScore Status
 data Enemie = MkBigEnemie Picture Coord Vel ShowObj Life | MkMiniEnemie Picture Coord Vel ShowObj
 data Player = MkPlayer Picture Coord Vel
 data Shot   = MkShot Picture Coord Vel ShowObj deriving Eq
@@ -46,22 +47,30 @@ drawingEnemies enemies = pictures (map drawEnemie enemies)
 drawingPlayer :: Player -> Picture 
 drawingPlayer (MkPlayer p (x,y) v)= translate x y p
 
-drawingWorld :: StdGen ->  World -> Picture
-drawingWorld g (MkWorld game p enemies shots) = pictures [pic_p, pic_enemies, pic_shots,textPoints]
+drawingWorld :: World -> Picture
+drawingWorld (MkWorld (MkGame time points True) p enemies shots) = pictures [pic_p, pic_enemies, pic_shots,textPoints]
     where
         pic_p = drawingPlayer p
         pic_enemies = drawingEnemies enemies
         pic_shots = drawingShots shots
-        points = show (getGamePoints game)
-        testX::Picture
-        testX = (color white (text "Pontos: "))
-        textPoints::Picture
-        textPoints = translate x y  (scale s s (color white (text ("Pontos: " ++ points))))
+        pointsStr = show points
+        textPoints = translate x y  (scale s s (color white (text ("Pontos: " ++ pointsStr))))
             where
                 x::Float
                 y::Float 
                 x = -400
                 y = 250
+                s = 0.3
+
+drawingWorld (MkWorld (MkGame time points False) p enemies shots) = textPoints
+    where
+        pointsStr = show points
+        textPoints = translate x y  (scale s s (color white (text ("Fim de jogo!\n Pontos totais: " ++ pointsStr))))
+            where
+                x::Float
+                y::Float 
+                x = -300
+                y = 0
                 s = 0.3
 
 
@@ -126,7 +135,7 @@ updateEnemieShow  nShots (MkBigEnemie p (x,y) v so l)
     | nShots <= 0 = MkBigEnemie p (x,y) v True l
     | l - 10 > 0 = MkBigEnemie p (x,y) v True (l - 10)
     | otherwise = MkBigEnemie p (x,y) v False 0
-updateEnemieShow  nShots (MkMiniEnemie p (x,y) v so)
+updateEnemieShow  nShots (MkMiniEnemie p (x,y) v so) 
     | nShots <= 0 = MkMiniEnemie p (x,y) v True 
     | otherwise = MkMiniEnemie p (x,y) v False 
 
@@ -163,7 +172,7 @@ enemiesShotsInteraction enemies shot = shotAfterEnemie
 --             (shotsTail,pointsTail) = separeteShotsAndPoints (tail shotsPoints)
 
 updateEnemiesShotsGame :: Float -> Game -> [Enemie] -> [Shot] -> (Game,[Enemie],[Shot])
-updateEnemiesShotsGame dt game enemies shots = (gameUpdated,enemiesUpdated,shotsUpdated)
+updateEnemiesShotsGame dt (MkGame time points True) enemies shots = (gameUpdated,enemiesUpdated,shotsUpdated)
     where
         enemiesAfterShots = map (shotsEnemiesInteraction shots) enemies
         enemiesToShow = [enemie | enemie <- enemiesAfterShots, enemieNeedShow enemie]
@@ -178,8 +187,11 @@ updateEnemiesShotsGame dt game enemies shots = (gameUpdated,enemiesUpdated,shots
         nBigEnemiesHit = length [enemie | enemie <- enemiesToNotShow, (getEnemieType enemie) == 1]
         pointsGot = 20*nBigEnemiesHit + 10*nMiniEnemiesHit
 
-        gameUpdated = updateGame game pointsGot
+        gameUpdated = updateGame (MkGame time points True) pointsGot enemiesUpdated
 
+updateEnemiesShotsGame dt (MkGame time points False) enemies shots = (gameUpdated,[],[])
+    where
+        gameUpdated = updateGame (MkGame time points False) 0 []
 
 
 updatePlayer :: Float -> Player -> Player 
@@ -196,8 +208,30 @@ getEnemiesFromTuple (enemies,shots) = enemies
 getShotsFromTuple :: ([Enemie],[Shot]) -> [Shot]
 getShotsFromTuple (enemies,shots) = shots
 
-updateGame :: Game -> Int -> Game
-updateGame (MkGame time points) pointsGot = MkGame (time + 1) (points + pointsGot)
+checkEnemiePosition :: Enemie -> Bool
+checkEnemiePosition  (MkBigEnemie p (x,y) v so l) = y <= -limiteY
+checkEnemiePosition   (MkMiniEnemie p (x,y) v so) = y <= -limiteY 
+
+updateGame :: Game -> Int -> [Enemie] -> Game
+updateGame (MkGame time points True) pointsGot enemies = MkGame newTime (points + pointsGot) newStatus
+    where
+        enemiesWin = [enemie | enemie <- enemies, checkEnemiePosition enemie ]    
+        nEnemiesWin = length enemiesWin
+        newStatus
+            | nEnemiesWin > 0 = False
+            | otherwise = True
+        newTime
+            | nEnemiesWin > 0 = 0
+            | otherwise = time + 1
+
+updateGame (MkGame time points False) pointsGot enemies = MkGame (time + 1) newPoints newStatus
+    where
+        newStatus
+            | time > 300 = True
+            | otherwise = False
+        newPoints
+            | time > 300 = 0
+            | otherwise = points
 
 sigmoid :: Float -> Float
 sigmoid x = 1/(1 + (2.718)**(-x))
@@ -221,13 +255,13 @@ getNewEnemie g time = newEnemie
             | otherwise = []
 
 getGameTime :: Game -> Time 
-getGameTime (MkGame time points) = time
+getGameTime (MkGame time points status) = time
 
 getGamePoints :: Game -> GameScore 
-getGamePoints (MkGame time points) = points
+getGamePoints (MkGame time points status) = points
 
 
-updateWorld :: StdGen -> Float ->  World -> World
+updateWorld :: StdGen -> Float -> World -> World
 updateWorld g dt (MkWorld game p enemies shots) = MkWorld gameUpdated (updatePlayer dt p) enemiesAll shotsUpdated
     where
         (gameUpdated,enemiesUpdated,shotsUpdated) = updateEnemiesShotsGame dt game enemies shots
@@ -352,7 +386,7 @@ main = do
     let displayWindow = InWindow "Enemies atack" (2 * limiteX, 2 * limiteY) (50, 50)
         simulationRate = 60
         player = MkPlayer (getPlayerShip 0) (0,-230) (0,0)
-        game = MkGame 0 0 
+        game = MkGame 300 0 True
         initWorld = MkWorld game player [] []
         
     play
@@ -360,7 +394,7 @@ main = do
        black
        simulationRate
        initWorld
-       (drawingWorld g)
+       drawingWorld
        inputHandler
        (updateWorld g)
    
