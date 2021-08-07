@@ -10,20 +10,28 @@ type ShowObj = Bool
 type GameScore = Int
 type Time = Int
 type Status = Bool
+type PowerType = String
 
-
-data Game = MkGame Time GameScore Status
+data Power  = MkPower Picture Coord Vel [PowerType] Time deriving Eq
+data Game   = MkGame Time GameScore Status
 data Enemie = MkBigEnemie Picture Coord Vel ShowObj Life | MkMiniEnemie Picture Coord Vel ShowObj
 data Player = MkPlayer Picture Coord Vel
-data Shot   = MkShot Picture Coord Vel ShowObj deriving Eq
-data World  = MkWorld Game Player [Enemie] [Shot]
+data Shot   = MkShot Picture Coord Vel ShowObj Power deriving Eq
+data World  = MkWorld Game Player [Enemie] [Shot] [Power]
 
 limiteX, limiteY :: Num a => a
 limiteX = 400
 limiteY = 300
 
+
+drawPower :: Power -> Picture 
+drawPower (MkPower p (x,y) v powerTypes time) = translate x y p
+
+drawingPowers :: [Power] -> Picture
+drawingPowers powers = pictures (map drawPower powers)
+
 drawShot:: Shot -> Picture
-drawShot (MkShot p (x,y) v so) = translate x y p
+drawShot (MkShot p (x,y) v so power) = translate x y p
 
 drawingShots :: [Shot] -> Picture
 drawingShots shots = pictures (map drawShot shots)
@@ -48,12 +56,14 @@ drawingPlayer :: Player -> Picture
 drawingPlayer (MkPlayer p (x,y) v)= translate x y p
 
 drawingWorld :: World -> Picture
-drawingWorld (MkWorld (MkGame time points True) p enemies shots) = pictures [pic_p, pic_enemies, pic_shots,textPoints]
+drawingWorld (MkWorld (MkGame time points True) player enemies shots powers) = pictures [pic_player, pic_enemies, pic_shots, pic_powers, textPoints]
     where
-        pic_p = drawingPlayer p
+        pic_player = drawingPlayer player
         pic_enemies = drawingEnemies enemies
         pic_shots = drawingShots shots
-        pointsStr = show points
+        pic_powers = drawingPowers powers
+
+        pointsStr = show (length powers) -- points
         textPoints = translate x y  (scale s s (color white (text ("Pontos: " ++ pointsStr))))
             where
                 x::Float
@@ -62,7 +72,7 @@ drawingWorld (MkWorld (MkGame time points True) p enemies shots) = pictures [pic
                 y = 250
                 s = 0.3
 
-drawingWorld (MkWorld (MkGame time points False) p enemies shots) = textPoints
+drawingWorld (MkWorld (MkGame time points False) p enemies shots powers) = textPoints
     where
         pointsStr = show points
         textPoints = translate x y  (scale s s (color white (text ("Fim de jogo!\n Pontos totais: " ++ pointsStr))))
@@ -75,15 +85,15 @@ drawingWorld (MkWorld (MkGame time points False) p enemies shots) = textPoints
 
 
 updatePosShot :: Float -> Shot -> Shot
-updatePosShot dt (MkShot p (x,y) (vx,vy) so) = MkShot p (x + vx*dt,y + vy*dt) (vx,vy) so
+updatePosShot dt (MkShot p (x,y) (vx,vy) so power) = MkShot p (x + vx*dt,y + vy*dt) (vx,vy) so power
 
 updateShowShot ::  Shot -> Shot
-updateShowShot (MkShot p (x,y) v so)
-    | x > limiteX || x < -limiteX || y > limiteY || y < -limiteY = MkShot p (x,y) v False
-    | otherwise = MkShot p (x,y) v True
+updateShowShot (MkShot p (x,y) v so power)
+    | x > limiteX || x < -limiteX || y > limiteY || y < -limiteY = MkShot p (x,y) v False power
+    | otherwise = MkShot p (x,y) v True power
 
 shotNeedShow :: Shot -> Bool
-shotNeedShow (MkShot p (x,y) v so) = so
+shotNeedShow (MkShot p (x,y) v so power) = so
 
 enemieNeedShow :: Enemie -> Bool
 enemieNeedShow (MkBigEnemie p (x,y) v so l) = so
@@ -116,14 +126,23 @@ updateVelEnemie (MkMiniEnemie p (x,y) (vx,vy) so)
 updateEnemies :: Float -> [Enemie] -> [Enemie]
 updateEnemies dt enemies = map (updateVelEnemie . updatePosEnemie dt) enemies
 
+
+verifyPlayerPower :: Player -> Power -> Bool
+verifyPlayerPower (MkPlayer pPlayer (xPlayer,yPlayer) vPlayer)  (MkPower pPower (xPower,yPower) vPower powersTypes powerTime) = getPower
+    where 
+        dist = sqrt ((xPlayer - xPower)*(xPlayer - xPower) + (yPlayer - yPower)*(yPlayer - yPower))
+        getPower 
+            | dist <= 30 = True 
+            | otherwise = False
+
 verifyShotEnemie :: Shot -> Enemie -> Bool
-verifyShotEnemie (MkShot sp (sx,sy) sv sso)  (MkBigEnemie ep (ex,ey) ev eso l) = getShot
+verifyShotEnemie (MkShot sp (sx,sy) sv sso power)  (MkBigEnemie ep (ex,ey) ev eso l) = getShot
     where 
         dist = sqrt ((sx - ex)*(sx - ex) + (sy - ey)*(sy - ey))
         getShot 
             | dist <= 50 = True 
             | otherwise = False
-verifyShotEnemie (MkShot sp (sx,sy) sv sso)  (MkMiniEnemie ep (ex,ey) ev eso) = getShot
+verifyShotEnemie (MkShot sp (sx,sy) sv sso power)  (MkMiniEnemie ep (ex,ey) ev eso) = getShot
     where 
         dist = sqrt ((sx - ex)*(sx - ex) + (sy - ey)*(sy - ey))
         getShot 
@@ -147,21 +166,30 @@ shotsEnemiesInteraction shots enemie = enemieAfterShot
         enemieAfterShot = updateEnemieShow nShots enemie
 
 updateShotShow :: Int -> Shot -> Shot
-updateShotShow  nEnemies (MkShot p (x,y) v so)
-    | nEnemies <= 0 = MkShot p (x,y) v True 
-    | otherwise = MkShot p (x,y) v False 
+updateShotShow  nEnemies (MkShot p (x,y) v so power)
+    | nEnemies <= 0 = MkShot p (x,y) v True power
+    | otherwise = MkShot p (x,y) v False power
 
 
 getEnemieType :: Enemie -> Int
 getEnemieType  (MkBigEnemie p (x,y) v so l) = 1
 getEnemieType  (MkMiniEnemie p (x,y) v so) = 0
 
+
+getShotPower :: Shot -> [PowerType]
+getShotPower (MkShot pShot (x,y) v so (MkPower pPower posPower vPower powersTypes powerTime) ) = powersTypes
+
 enemiesShotsInteraction:: [Enemie] -> Shot -> Shot
 enemiesShotsInteraction enemies shot = shotAfterEnemie
     where
-        shotsEnemiesGotHit = [enemie | enemie <- enemies, verifyShotEnemie shot enemie]
-        nEnemies = length shotsEnemiesGotHit
-        shotAfterEnemie = updateShotShow nEnemies shot
+        powers = getShotPower shot
+        shotAfterEnemie
+            | (elem "Test" powers) = shot 
+            | otherwise = shotAfterEnemieValue
+                where 
+                    shotsEnemiesGotHit = [enemie | enemie <- enemies, verifyShotEnemie shot enemie]
+                    nEnemies = length shotsEnemiesGotHit
+                    shotAfterEnemieValue = updateShotShow nEnemies shot
 
 -- separeteShotsAndPoints :: [(Shot,Int)] -> ([Shot],Int)
 -- separeteShotsAndPoints shotsPoints
@@ -194,13 +222,28 @@ updateEnemiesShotsGame dt (MkGame time points False) enemies shots = (gameUpdate
         gameUpdated = updateGame (MkGame time points False) 0 []
 
 
-updatePlayer :: Float -> Player -> Player 
-updatePlayer _ (MkPlayer p (x,y) v)
+updatePlayer :: Player -> Player 
+updatePlayer (MkPlayer p (x,y) v)
     | x > limiteX  = MkPlayer p (limiteX,y) v
     | x < -limiteX = MkPlayer p (-limiteX,y) v
     | y > limiteY =  MkPlayer p (x,limiteY) v
     | y < -limiteY = MkPlayer p (x,-limiteY) v 
     | otherwise  = MkPlayer p (x,y) v
+
+updatePower :: Float -> Power -> Power
+updatePower dt (MkPower p (x,y) (xv,yv) powersTypes powerTime) =MkPower p (x + xv*dt,y + yv*dt) (xv,yv) powersTypes powerTime
+
+updatePlayerPowers :: Float -> Player -> [Power] -> Game -> (Player,[Power])
+updatePlayerPowers dt player powers (MkGame time points True) = (updatedPlayer,updatedPowers)
+    where
+        updatedPlayer = updatePlayer player
+        powersToShow = [power | power <- powers, not(verifyPlayerPower player power)]
+        updatedPowers = map (updatePower dt) powersToShow
+    
+updatePlayerPowers dt player powers (MkGame time points False) = (updatedPlayer,updatedPowers)
+    where
+        updatedPlayer = MkPlayer (getPlayerShip 0) (0,-230) (0,0)
+        updatedPowers = []  
 
 getEnemiesFromTuple :: ([Enemie],[Shot]) -> [Enemie]
 getEnemiesFromTuple (enemies,shots) = enemies 
@@ -237,6 +280,22 @@ sigmoid :: Float -> Float
 sigmoid x = 1/(1 + (2.718)**(-x))
 
 
+getNewPower :: StdGen -> Time -> [Power]
+getNewPower g time = newPower
+    where 
+        (gT,gPV) = split g
+        (gP,gV) = split gPV
+        xP = limiteX - 2*(limiteX * ((randomRs (0::Float,1::Float) gP)!!time))
+        yV = (-200) * ((randomRs (0::Float,1::Float) gV)!!time)
+        coord = (xP,360)
+        vel = (0,yV)
+        powerType :: Float
+        powerType = ((randomRs (0::Float,1::Float) gT)!!time)
+        factor = (log (fromIntegral (100*time) :: Float))
+        newPower 
+            | powerType <= 0.0005 * factor = [createPower coord vel] 
+            | otherwise = []
+
 getNewEnemie :: StdGen -> Time -> [Enemie]
 getNewEnemie g time = newEnemie
     where 
@@ -262,12 +321,21 @@ getGamePoints (MkGame time points status) = points
 
 
 updateWorld :: StdGen -> Float -> World -> World
-updateWorld g dt (MkWorld game p enemies shots) = MkWorld gameUpdated (updatePlayer dt p) enemiesAll shotsUpdated
+updateWorld g dt (MkWorld game player enemies shots powers) = MkWorld gameUpdated playerUpdated enemiesAll shotsUpdated powersAll
     where
+        (gEnemies, gPowers) = split g
         (gameUpdated,enemiesUpdated,shotsUpdated) = updateEnemiesShotsGame dt game enemies shots
         time = getGameTime gameUpdated
-        newEnemie = getNewEnemie g time
+
+        (playerUpdated,powerUpdated) = (updatePlayerPowers dt player powers game)
+
+        newEnemie = getNewEnemie gEnemies time
         enemiesAll = enemiesUpdated ++ newEnemie
+
+        newPower = getNewPower gPowers time
+        powersAll = powerUpdated ++ newPower 
+
+
         
 
 getEnemieShip:: Color -> Float -> Picture
@@ -332,6 +400,10 @@ moveThePlayer xPos yPos mv (MkPlayer p (x,y) v) = MkPlayer newPic (newX,y) v
             | otherwise = angDegree
         newPic = getPlayerShip adjustedAng
 
+
+createPower :: Coord -> Vel -> Power 
+createPower coord vel =  (MkPower (color red (circleSolid 20)) coord vel ["Test2"] 0)
+
 getShotFormat :: Picture
 getShotFormat = color white (circleSolid 5)
 
@@ -346,16 +418,24 @@ addShot (MkPlayer p (x,y) v) (xPos,yPos)  shots = shots ++ [newShot]
             | otherwise = angDegree
         xv = baseVel * (sin adjustedAng)
         yv = baseVel * (cos adjustedAng)
-        newShot = MkShot getShotFormat (x,y+30) (xv,yv) True
+        newShot = MkShot getShotFormat (x,y+30) (xv,yv) True (MkPower (color red (circleSolid 5)) (0,0) (0,0) ["Test2"] 0)
 
 inputHandler :: Event -> World -> World
-inputHandler (EventKey (SpecialKey keyPressed) Down _ (xPos,yPos)) (MkWorld game p enemies shots) = 
+
+inputHandler (EventKey (MouseButton _) Down _ (xPos,yPos)) (MkWorld game p enemies shots powers) = 
+    MkWorld game (moveThePlayer xPos yPos 0 p) enemies (addShot p (xPos,yPos) shots) powers
+
+
+inputHandler (EventKey (SpecialKey keyPressed) Down _ (xPos,yPos)) (MkWorld game p enemies shots powers) = 
     case (keyPressed) of
-        KeyRight -> MkWorld game (moveThePlayer xPos yPos 30 p) enemies shots
-        KeyLeft  -> MkWorld game (moveThePlayer xPos yPos (-30) p) enemies shots
-        KeySpace -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies (addShot p (xPos,yPos) shots)
-        _ -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies shots
-inputHandler (EventMotion (xPos,yPos)) (MkWorld game p enemies shots) = MkWorld game (moveThePlayer xPos yPos 0 p) enemies shots
+        KeyRight -> MkWorld game (moveThePlayer xPos yPos 30 p) enemies shots powers
+        KeyLeft  -> MkWorld game (moveThePlayer xPos yPos (-30) p) enemies shots powers
+        KeySpace -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies (addShot p (xPos,yPos) shots) powers
+        _ -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies shots powers
+
+
+
+inputHandler (EventMotion (xPos,yPos)) (MkWorld game p enemies shots powers) = MkWorld game (moveThePlayer xPos yPos 0 p) enemies shots powers
 inputHandler _ w = w
 
 
@@ -387,7 +467,7 @@ main = do
         simulationRate = 60
         player = MkPlayer (getPlayerShip 0) (0,-230) (0,0)
         game = MkGame 300 0 True
-        initWorld = MkWorld game player [] []
+        initWorld = MkWorld game player [] [] []
         
     play
        displayWindow
