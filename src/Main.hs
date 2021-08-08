@@ -332,8 +332,9 @@ getNewPower g time = newPower
         powerType = ((randomRs (0::Float,1::Float) gT)!!time)
         factor = (log (fromIntegral (100*time) :: Float))
         newPower 
-            | powerType <= 0.001 * factor = [createPower coord vel 0] 
-            | powerType <= 0.01 * factor = [createPower coord vel 1] 
+            | powerType <= 0.0001 * factor = [createPower coord vel 0] 
+            | powerType <= 0.0005 * factor = [createPower coord vel 1] 
+            | powerType <= 0.001 * factor  = [createPower coord vel 2] 
             | otherwise = []
 
 getNewEnemie :: StdGen -> Time -> [Enemie]
@@ -444,6 +445,7 @@ moveThePlayer xPos yPos mv (MkPlayer p (x,y) v) = MkPlayer newPic (newX,y) v
 createPower :: Coord -> Vel -> Int -> Power 
 createPower coord vel 0 =  (MkPower (color red (circleSolid 20)) coord vel ["Imortal"] 120)
 createPower coord vel 1 =  (MkPower (color yellow (circleSolid 20)) coord vel ["Trio"] 120)
+createPower coord vel 2 =  (MkPower (color green (circleSolid 20)) coord vel ["SuperSpeed"] 120)
 
 
 getShotFormat :: Power -> Picture
@@ -460,7 +462,10 @@ getPowerTypes (MkPower p coord vel powersTypes time) = powersTypes
 createShotWithAngle :: Float -> Float -> Power -> Float -> Shot
 createShotWithAngle x y power angle = MkShot (getShotFormat power) (x,y+30) (xv,yv) True power
     where
-        baseVel = 300
+        powerTypes = getPowerTypes power
+        baseVel
+            | (elem "SuperSpeed" powerTypes) = 900
+            | otherwise = 300
         xv = baseVel * (sin angle)
         yv = baseVel * (cos angle)
         
