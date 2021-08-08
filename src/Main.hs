@@ -158,7 +158,7 @@ verifyPlayerPower (MkPlayer pPlayer (xPlayer,yPlayer) vPlayer)  (MkPower pPower 
     where 
         dist = sqrt ((xPlayer - xPower)*(xPlayer - xPower) + (yPlayer - yPower)*(yPlayer - yPower))
         getPower 
-            | dist <= 30 = True 
+            | dist <= 40 = True 
             | otherwise = False
 
 verifyShotEnemie :: Shot -> Enemie -> Bool
@@ -308,7 +308,7 @@ updateGame (MkGame time points power True) pointsGot enemies = MkGame newTime (p
             | nEnemiesWin > 0 = 0
             | otherwise = time + 1
 
-updateGame (MkGame time points power False) pointsGot enemies = MkGame (time + 1) newPoints power newStatus
+updateGame (MkGame time points power False) pointsGot enemies = MkGame (time + 1) newPoints NoPower newStatus
     where
         newStatus
             | time > 300 = True
@@ -332,7 +332,8 @@ getNewPower g time = newPower
         powerType = ((randomRs (0::Float,1::Float) gT)!!time)
         factor = (log (fromIntegral (100*time) :: Float))
         newPower 
-            | powerType <= 0.001 * factor = [createPower coord vel] 
+            | powerType <= 0.001 * factor = [createPower coord vel 0] 
+            | powerType <= 0.01 * factor = [createPower coord vel 1] 
             | otherwise = []
 
 getNewEnemie :: StdGen -> Time -> [Enemie]
@@ -440,25 +441,43 @@ moveThePlayer xPos yPos mv (MkPlayer p (x,y) v) = MkPlayer newPic (newX,y) v
         newPic = getPlayerShip adjustedAng
 
 
-createPower :: Coord -> Vel -> Power 
-createPower coord vel =  (MkPower (color red (circleSolid 20)) coord vel ["Imortal"] 120)
+createPower :: Coord -> Vel -> Int -> Power 
+createPower coord vel 0 =  (MkPower (color red (circleSolid 20)) coord vel ["Imortal"] 120)
+createPower coord vel 1 =  (MkPower (color yellow (circleSolid 20)) coord vel ["Trio"] 120)
+
 
 getShotFormat :: Power -> Picture
 getShotFormat NoPower = color white (circleSolid 5)
-getShotFormat _ = color yellow (circleSolid 5)
+getShotFormat (MkPower p coord vel powerTypes time)
+    | (elem "Imortal" powerTypes) = color yellow (circleSolid 5)
+    | otherwise = color white (circleSolid 5)
 
-addShot :: Game -> Player -> Coord -> [Shot] -> [Shot]
-addShot (MkGame time score power status) (MkPlayer p (x,y) v) (xPos,yPos)  shots = shots ++ [newShot]
+getPowerTypes :: Power -> [String]
+getPowerTypes NoPower = []
+getPowerTypes (MkPower p coord vel powersTypes time) = powersTypes
+
+
+createShotWithAngle :: Float -> Float -> Power -> Float -> Shot
+createShotWithAngle x y power angle = MkShot (getShotFormat power) (x,y+30) (xv,yv) True power
     where
         baseVel = 300
+        xv = baseVel * (sin angle)
+        yv = baseVel * (cos angle)
+        
+
+addShot :: Game -> Player -> Coord -> [Shot] -> [Shot]
+addShot (MkGame time score power status) (MkPlayer p (x,y) v) (xPos,yPos)  shots = shots ++ newShots
+    where
+        baseAngle = 0.785398
+        powerTypes = getPowerTypes power
         angDegree = getMouseAng (xPos,yPos) (x,y)
         adjustedAng
-            | angDegree > 0.785398  = 0.785398 
-            | angDegree < -0.785398  = -0.785398 
+            | angDegree > baseAngle = baseAngle 
+            | angDegree < -baseAngle  = -baseAngle
             | otherwise = angDegree
-        xv = baseVel * (sin adjustedAng)
-        yv = baseVel * (cos adjustedAng)
-        newShot = MkShot (getShotFormat power) (x,y+30) (xv,yv) True power
+        newShots
+            | (elem "Trio" powerTypes) = map (createShotWithAngle x y power) [adjustedAng - baseAngle , adjustedAng, adjustedAng + baseAngle]
+            | otherwise = [createShotWithAngle x y power adjustedAng]
 
 inputHandler :: Event -> World -> World
 
@@ -468,8 +487,8 @@ inputHandler (EventKey (MouseButton _) Down _ (xPos,yPos)) (MkWorld game p enemi
 
 inputHandler (EventKey (SpecialKey keyPressed) Down _ (xPos,yPos)) (MkWorld game p enemies shots powers) = 
     case (keyPressed) of
-        KeyRight -> MkWorld game (moveThePlayer xPos yPos 30 p) enemies shots powers
-        KeyLeft  -> MkWorld game (moveThePlayer xPos yPos (-30) p) enemies shots powers
+        KeyRight -> MkWorld game (moveThePlayer xPos yPos 60 p) enemies shots powers
+        KeyLeft  -> MkWorld game (moveThePlayer xPos yPos (-60) p) enemies shots powers
         KeySpace -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies (addShot game p (xPos,yPos) shots) powers
         _ -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies shots powers
 
