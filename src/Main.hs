@@ -12,12 +12,13 @@ type Time = Int
 type Status = Bool
 type PowerType = String
 
+data Star   = MkStar Picture Coord Vel
 data Power  = MkPower Picture Coord Vel [PowerType] Time | NoPower deriving (Eq,Show)
 data Game   = MkGame Time GameScore Power Status
 data Enemie = MkBigEnemie Picture Coord Vel ShowObj Life | MkMiniEnemie Picture Coord Vel ShowObj
 data Player = MkPlayer Picture Coord Vel
 data Shot   = MkShot Picture Coord Vel ShowObj Power deriving Eq
-data World  = MkWorld Game Player [Enemie] [Shot] [Power]
+data World  = MkWorld Game Player [Enemie] [Shot] [Power] [Star]
 
 fold :: Monoid a => [a] -> a
 fold []  = mempty
@@ -41,6 +42,11 @@ limiteX, limiteY :: Num a => a
 limiteX = 400
 limiteY = 300
 
+drawStar :: Star -> Picture 
+drawStar (MkStar p (x,y) v) = translate x y p
+
+drawingStars :: [Star] -> Picture
+drawingStars stars = pictures (map drawStar stars)
 
 drawPower :: Power -> Picture 
 drawPower (MkPower p (x,y) v powerTypes time) = translate x y p
@@ -82,12 +88,13 @@ getGamePower (MkPower _ _ _ _ time) = time
 getGamePower _ = -1
 
 drawingWorld :: World -> Picture
-drawingWorld (MkWorld (MkGame time points gamePower True) player enemies shots powers) = pictures [pic_player, pic_enemies, pic_shots, pic_powers, textPoints]
+drawingWorld (MkWorld (MkGame time points gamePower True) player enemies shots powers stars) = pictures [pic_stars, pic_player, pic_enemies, pic_shots, pic_powers, textPoints]
     where
         pic_player = drawingPlayer player
         pic_enemies = drawingEnemies enemies
         pic_shots = drawingShots shots
         pic_powers = drawingPowers powers
+        pic_stars = drawingStars stars
 
         pointsStr = show points
         textPoints = translate x y  (scale s s (color white (text ("Pontos: " ++ pointsStr))))
@@ -98,7 +105,7 @@ drawingWorld (MkWorld (MkGame time points gamePower True) player enemies shots p
                 y = 250
                 s = 0.3
 
-drawingWorld (MkWorld (MkGame time points power False) p enemies shots powers) = textPoints
+drawingWorld (MkWorld (MkGame time points power False) p enemies shots powers stars) = textPoints
     where
         pointsStr = show points
         textPoints = translate x y  (scale s s (color white (text ("Fim de jogo! Pontos totais: " ++ pointsStr))))
@@ -250,6 +257,17 @@ updateEnemiesShotsGame dt (MkGame time points power False) enemies shots = (game
     where
         gameUpdated = updateGame (MkGame time points power False) 0 []
 
+updateStar :: Float -> Star -> Star 
+updateStar dt (MkStar p (x,y) (xv,yv))
+    | x > limiteX  = MkStar p (-limiteX,y) (xv,yv)
+    | x < -limiteX = MkStar p (limiteX,y) (xv,yv)
+    | y > limiteY =  MkStar p (x,-limiteY) (xv,yv)
+    | y < -limiteY = MkStar p (x,limiteY) (xv,yv) 
+    | otherwise  = MkStar p (x + dt*xv,y + dt*yv) (xv,yv)
+
+
+updateStars :: Float -> [Star] -> [Star]
+updateStars dt stars = map (updateStar dt) stars
 
 updatePlayer :: Player -> Player 
 updatePlayer (MkPlayer p (x,y) v)
@@ -362,13 +380,15 @@ getGamePoints (MkGame time points power status) = points
 
 
 updateWorld :: StdGen -> Float -> World -> World
-updateWorld g dt (MkWorld game player enemies shots powers) = MkWorld gameUpdated2 playerUpdated enemiesAll shotsUpdated powersAll
+updateWorld g dt (MkWorld game player enemies shots powers stars) = MkWorld gameUpdated2 playerUpdated enemiesAll shotsUpdated powersAll updatedStars
     where
         (gEnemies, gPowers) = split g
         (gameUpdated1,enemiesUpdated,shotsUpdated) = updateEnemiesShotsGame dt game enemies shots
         time = getGameTime gameUpdated1
 
         (playerUpdated,powerUpdated,gameUpdated2) = (updatePlayerPowersGame dt player powers gameUpdated1)
+
+        updatedStars = updateStars dt stars
 
         newEnemie = getNewEnemie gEnemies time
         enemiesAll = enemiesUpdated ++ newEnemie
@@ -417,6 +437,25 @@ createEnemies g n = take n $ zipWith3 createEnemie coords vels tps
 
         --cores = cycle [red,black,yellow,blue,green]
 
+getStarFormat :: Picture
+getStarFormat = color starColor (circleSolid 2)
+    where  
+        starColor = makeColor 255 255 255 0.5
+
+createStar :: Coord -> Star
+createStar pos = MkStar (getStarFormat) pos (50,50)
+
+createStarsPositions :: Int -> Coord -> [Coord]
+createStarsPositions 0 _ = []
+createStarsPositions n (lastX,lastY)
+    | lastY < -limiteY = []
+    | (lastX + s) >= limiteX  = [(-limiteX, lastY - s)] ++ (createStarsPositions (n - 1) (-limiteX,lastY - s))
+    | otherwise = [(lastX + s, lastY)] ++ (createStarsPositions (n - 1) (lastX + s,lastY))
+        where
+            s = 50
+
+createStars :: [Star]
+createStars = map createStar (createStarsPositions 500 (-limiteX, limiteY))
 
 getMouseAng ::  Coord -> Coord -> Float
 getMouseAng (xPos,yPos) (pX,pY) = aTang
@@ -486,20 +525,20 @@ addShot (MkGame time score power status) (MkPlayer p (x,y) v) (xPos,yPos)  shots
 
 inputHandler :: Event -> World -> World
 
-inputHandler (EventKey (MouseButton _) Down _ (xPos,yPos)) (MkWorld game p enemies shots powers) = 
-    MkWorld game (moveThePlayer xPos yPos 0 p) enemies (addShot game p (xPos,yPos) shots) powers
+inputHandler (EventKey (MouseButton _) Down _ (xPos,yPos)) (MkWorld game p enemies shots powers stars) = 
+    MkWorld game (moveThePlayer xPos yPos 0 p) enemies (addShot game p (xPos,yPos) shots) powers stars
 
 
-inputHandler (EventKey (SpecialKey keyPressed) Down _ (xPos,yPos)) (MkWorld game p enemies shots powers) = 
+inputHandler (EventKey (SpecialKey keyPressed) Down _ (xPos,yPos)) (MkWorld game p enemies shots powers stars) = 
     case (keyPressed) of
-        KeyRight -> MkWorld game (moveThePlayer xPos yPos 60 p) enemies shots powers
-        KeyLeft  -> MkWorld game (moveThePlayer xPos yPos (-60) p) enemies shots powers
-        KeySpace -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies (addShot game p (xPos,yPos) shots) powers
-        _ -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies shots powers
+        KeyRight -> MkWorld game (moveThePlayer xPos yPos 60 p) enemies shots powers stars
+        KeyLeft  -> MkWorld game (moveThePlayer xPos yPos (-60) p) enemies shots powers stars
+        KeySpace -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies (addShot game p (xPos,yPos) shots) powers stars
+        _ -> MkWorld game (moveThePlayer xPos yPos 0 p) enemies shots powers stars
 
 
 
-inputHandler (EventMotion (xPos,yPos)) (MkWorld game p enemies shots powers) = MkWorld game (moveThePlayer xPos yPos 0 p) enemies shots powers
+inputHandler (EventMotion (xPos,yPos)) (MkWorld game p enemies shots powers stars) = MkWorld game (moveThePlayer xPos yPos 0 p) enemies shots powers stars
 inputHandler _ w = w
 
 
@@ -529,9 +568,10 @@ main = do
     g <- getStdGen
     let displayWindow = InWindow "Enemies atack" (2 * limiteX, 2 * limiteY) (50, 50)
         simulationRate = 60
+        stars = createStars
         player = MkPlayer (getPlayerShip 0) (0,-230) (0,0)
         game = MkGame 300 0 NoPower True 
-        initWorld = MkWorld game player [] [] []
+        initWorld = MkWorld game player [] [] [] stars
         
     play
        displayWindow
