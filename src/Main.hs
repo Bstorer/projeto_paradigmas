@@ -23,10 +23,33 @@ data Player = MkPlayer Picture Coord Vel
 data Shot   = MkShot Picture Coord Vel ShowObj Power deriving Eq
 data World  = MkWorld Game Player [Enemie] [Shot] [Power] [Star]
 
-fold :: Monoid a => [a] -> a
-fold []  = mempty
-fold (x:xs) = x `mappend` fold xs
 
+class Draw a where
+    draw :: a -> Picture
+
+instance Draw Star where 
+    draw (MkStar p (x,y) v) = translate x y p
+
+instance Draw Power where 
+    draw (MkPower p (x,y) v powerTypes time) = translate x y p
+    draw NoPower = Blank
+
+instance Draw Shot where 
+    draw (MkShot p (x,y) v so power) = translate x y p
+
+instance Draw Enemie where 
+    draw (MkBigEnemie p (x,y) v so l) =  enemieShip
+        where 
+            enemieShip
+                    | l >= 30 = translate x y p
+                    | l >= 20 = translate x y (getEnemieShip (makeColor (210/255) (96/255) (8/255) 1) 1.2)
+                    | l >= 10 = translate x y (getEnemieShip (makeColor (210/255) (62/255) (8/255) 1) 1.2)
+                    | otherwise = translate x y p
+
+    draw (MkMiniEnemie p (x,y) v so) = translate x y p
+
+instance Draw Player where 
+    draw (MkPlayer p (x,y) v)= translate x y p
 
 instance Semigroup Power where
     NoPower <> NoPower = NoPower
@@ -41,46 +64,28 @@ instance Monoid Power where
 
 
 
+fold :: Monoid a => [a] -> a
+fold []  = mempty
+fold (x:xs) = x `mappend` fold xs
+
+
 limiteX, limiteY :: Num a => a
 limiteX = 400
 limiteY = 300
 
-drawStar :: Star -> Picture 
-drawStar (MkStar p (x,y) v) = translate x y p
-
 drawingStars :: [Star] -> Picture
-drawingStars stars = pictures (map drawStar stars)
-
-drawPower :: Power -> Picture 
-drawPower (MkPower p (x,y) v powerTypes time) = translate x y p
+drawingStars stars = pictures (map draw stars)
 
 drawingPowers :: [Power] -> Picture
-drawingPowers powers = pictures (map drawPower powers)
-
-drawShot:: Shot -> Picture
-drawShot (MkShot p (x,y) v so power) = translate x y p
+drawingPowers powers = pictures (map draw powers)
 
 drawingShots :: [Shot] -> Picture
-drawingShots shots = pictures (map drawShot shots)
-
-drawEnemie:: Enemie -> Picture
-drawEnemie (MkBigEnemie p (x,y) v so l) =  enemieShip
-    where 
-        enemieShip
-           | l >= 30 = translate x y p
-           | l >= 20 = translate x y (getEnemieShip (makeColor (210/255) (96/255) (8/255) 1) 1.2)
-           | l >= 10 = translate x y (getEnemieShip (makeColor (210/255) (62/255) (8/255) 1) 1.2)
-           | otherwise = translate x y p
-        
-drawEnemie (MkMiniEnemie p (x,y) v so) = translate x y p
+drawingShots shots = pictures (map draw shots)
 
 
 drawingEnemies :: [Enemie] -> Picture
-drawingEnemies enemies = pictures (map drawEnemie enemies)
+drawingEnemies enemies = pictures (map draw enemies)
 
-
-drawingPlayer :: Player -> Picture 
-drawingPlayer (MkPlayer p (x,y) v)= translate x y p
 
 getFirstShot :: [Shot] -> Shot
 getFirstShot [] = MkShot Blank (0,0) (0,0) False NoPower
@@ -93,7 +98,7 @@ getGamePower _ = -1
 drawingWorld :: World -> Picture
 drawingWorld (MkWorld (MkGame time restart baseTime points gamePower True) player enemies shots powers stars) = pictures [pic_stars, pic_player, pic_enemies, pic_shots, pic_powers, textPoints]
     where
-        pic_player = drawingPlayer player
+        pic_player = draw player
         pic_enemies = drawingEnemies enemies
         pic_shots = drawingShots shots
         pic_powers = drawingPowers powers
