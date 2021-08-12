@@ -9,12 +9,15 @@ type Vel = (Float,Float)
 type ShowObj = Bool
 type GameScore = Int
 type Time = Int
+type RestarTime = Int  
+type BaseTime = Int
 type Status = Bool
 type PowerType = String
 
+
 data Star   = MkStar Picture Coord Vel
 data Power  = MkPower Picture Coord Vel [PowerType] Time | NoPower deriving (Eq,Show)
-data Game   = MkGame Time GameScore Power Status
+data Game   = MkGame Time RestarTime BaseTime GameScore Power Status
 data Enemie = MkBigEnemie Picture Coord Vel ShowObj Life | MkMiniEnemie Picture Coord Vel ShowObj
 data Player = MkPlayer Picture Coord Vel
 data Shot   = MkShot Picture Coord Vel ShowObj Power deriving Eq
@@ -61,13 +64,13 @@ drawingShots :: [Shot] -> Picture
 drawingShots shots = pictures (map drawShot shots)
 
 drawEnemie:: Enemie -> Picture
-drawEnemie (MkBigEnemie p (x,y) v so l) =  translate x y (getEnemieShip enemieColor 1.2)
+drawEnemie (MkBigEnemie p (x,y) v so l) =  enemieShip
     where 
-        enemieColor
-           | l >= 30 = green--makeColor 82 4 161 1
-           | l >= 20 = yellow --makeColor 6 3 98 1
-           | l >= 10 = red --makeColor 55 3 98 1
-           | otherwise = white
+        enemieShip
+           | l >= 30 = translate x y p
+           | l >= 20 = translate x y (getEnemieShip (makeColor (210/255) (96/255) (8/255) 1) 1.2)
+           | l >= 10 = translate x y (getEnemieShip (makeColor (210/255) (62/255) (8/255) 1) 1.2)
+           | otherwise = translate x y p
         
 drawEnemie (MkMiniEnemie p (x,y) v so) = translate x y p
 
@@ -88,7 +91,7 @@ getGamePower (MkPower _ _ _ _ time) = time
 getGamePower _ = -1
 
 drawingWorld :: World -> Picture
-drawingWorld (MkWorld (MkGame time points gamePower True) player enemies shots powers stars) = pictures [pic_stars, pic_player, pic_enemies, pic_shots, pic_powers, textPoints]
+drawingWorld (MkWorld (MkGame time restart baseTime points gamePower True) player enemies shots powers stars) = pictures [pic_stars, pic_player, pic_enemies, pic_shots, pic_powers, textPoints]
     where
         pic_player = drawingPlayer player
         pic_enemies = drawingEnemies enemies
@@ -105,7 +108,7 @@ drawingWorld (MkWorld (MkGame time points gamePower True) player enemies shots p
                 y = 250
                 s = 0.3
 
-drawingWorld (MkWorld (MkGame time points power False) p enemies shots powers stars) = textPoints
+drawingWorld (MkWorld (MkGame time restart baseTime points power False) p enemies shots powers stars) = textPoints
     where
         pointsStr = show points
         textPoints = translate x y  (scale s s (color white (text ("Fim de jogo! Pontos totais: " ++ pointsStr))))
@@ -236,7 +239,7 @@ enemiesShotsInteraction enemies shot = shotAfterEnemie
 --             (shotsTail,pointsTail) = separeteShotsAndPoints (tail shotsPoints)
 
 updateEnemiesShotsGame :: Float -> Game -> [Enemie] -> [Shot] -> (Game,[Enemie],[Shot])
-updateEnemiesShotsGame dt (MkGame time points power True) enemies shots = (gameUpdated,enemiesUpdated,shotsUpdated)
+updateEnemiesShotsGame dt (MkGame time restart baseTime points power True) enemies shots = (gameUpdated,enemiesUpdated,shotsUpdated)
     where
         enemiesAfterShots = map (shotsEnemiesInteraction shots) enemies
         enemiesToShow = [enemie | enemie <- enemiesAfterShots, enemieNeedShow enemie]
@@ -251,11 +254,11 @@ updateEnemiesShotsGame dt (MkGame time points power True) enemies shots = (gameU
         nBigEnemiesHit = length [enemie | enemie <- enemiesToNotShow, (getEnemieType enemie) == 1]
         pointsGot = 20*nBigEnemiesHit + 10*nMiniEnemiesHit
 
-        gameUpdated = updateGame (MkGame time points power True) pointsGot enemiesUpdated
+        gameUpdated = updateGame (MkGame time restart baseTime points power True) pointsGot enemiesUpdated
 
-updateEnemiesShotsGame dt (MkGame time points power False) enemies shots = (gameUpdated,[],[])
+updateEnemiesShotsGame dt (MkGame time restart baseTime points power False) enemies shots = (gameUpdated,[],[])
     where
-        gameUpdated = updateGame (MkGame time points power False) 0 []
+        gameUpdated = updateGame (MkGame time restart baseTime points power False) 0 []
 
 updateStar :: Float -> Star -> Star 
 updateStar dt (MkStar p (x,y) (xv,yv))
@@ -287,7 +290,7 @@ updateGamePower (MkPower p (x,y) (xv,yv) powersTypes powerTime)
     | otherwise = NoPower
 
 updatePlayerPowersGame :: Float -> Player -> [Power] -> Game -> (Player,[Power],Game)
-updatePlayerPowersGame dt player powers (MkGame time points power True) = (updatedPlayer,updatedPowers,updatedGame)
+updatePlayerPowersGame dt player powers (MkGame time restart baseTime points power True) = (updatedPlayer,updatedPowers,updatedGame)
     where
         updatedPlayer = updatePlayer player
         powersToShow = [power | power <- powers, not(verifyPlayerPower player power)]
@@ -295,14 +298,14 @@ updatePlayerPowersGame dt player powers (MkGame time points power True) = (updat
 
         gamePowerUpdated = updateGamePower power
         powersEarned = fold [power | power <- powers, verifyPlayerPower player power]
-        updatedGame = MkGame time points (powersEarned <> gamePowerUpdated) True
+        updatedGame = MkGame time restart baseTime points (powersEarned <> gamePowerUpdated) True
 
     
-updatePlayerPowersGame dt player powers (MkGame time points power False) = (updatedPlayer,updatedPowers,updatedGame)
+updatePlayerPowersGame dt player powers (MkGame time restart baseTime points power False) = (updatedPlayer,updatedPowers,updatedGame)
     where
         updatedPlayer = MkPlayer (getPlayerShip 0) (0,-230) (0,0)
         updatedPowers = []  
-        updatedGame = MkGame time points power False
+        updatedGame = MkGame time restart baseTime points power False
 
 getEnemiesFromTuple :: ([Enemie],[Shot]) -> [Enemie]
 getEnemiesFromTuple (enemies,shots) = enemies 
@@ -315,68 +318,75 @@ checkEnemiePosition  (MkBigEnemie p (x,y) v so l) = y <= -limiteY
 checkEnemiePosition   (MkMiniEnemie p (x,y) v so) = y <= -limiteY 
 
 updateGame :: Game -> Int -> [Enemie] -> Game
-updateGame (MkGame time points power True) pointsGot enemies = MkGame newTime (points + pointsGot) power newStatus
+updateGame (MkGame time restart baseTime points power True) pointsGot enemies = MkGame (time + 1) newRestarTime baseTime (points + pointsGot) power newStatus
     where
         enemiesWin = [enemie | enemie <- enemies, checkEnemiePosition enemie ]    
         nEnemiesWin = length enemiesWin
         newStatus
             | nEnemiesWin > 0 = False
             | otherwise = True
-        newTime
+        newRestarTime
             | nEnemiesWin > 0 = 0
-            | otherwise = time + 1
+            | otherwise = restart
 
-updateGame (MkGame time points power False) pointsGot enemies = MkGame (time + 1) newPoints NoPower newStatus
+updateGame (MkGame time restart baseTime points power False) pointsGot enemies = MkGame time (restart + 1) newBaseTime newPoints NoPower newStatus
     where
+        newBaseTime = time
         newStatus
-            | time > 300 = True
+            | restart > 300 = True
             | otherwise = False
         newPoints
-            | time > 300 = 0
+            | restart > 300 = 0
             | otherwise = points
 
 
 
-getNewPower :: StdGen -> Time -> [Power]
-getNewPower g time = newPower
+getNewPower :: StdGen -> Game -> [Power]
+getNewPower g (MkGame time restart baseTime points power status) = newPower
     where 
         (gT,gPV) = split g
         (gP,gV) = split gPV
         xP = limiteX - 2*(limiteX * ((randomRs (0::Float,1::Float) gP)!!time))
-        yV = (-200) * ((randomRs (0::Float,1::Float) gV)!!time)
-        coord = (xP,360)
+        yVBase = (-200) * ((randomRs (0::Float,1::Float) gV)!!time)
+        yV
+            | yVBase > -50 = -50
+            | otherwise = yVBase
+        coord = (xP,380)
         vel = (0,yV)
         powerType :: Float
         powerType = ((randomRs (0::Float,1::Float) gT)!!time)
-        factor = (log (fromIntegral (100*time) :: Float))
+        factor = (log (fromIntegral (100*(time-baseTime)) :: Float))
         newPower 
-            | powerType <= 0.0001 * factor = [createPower coord vel 0] 
-            | powerType <= 0.0005 * factor = [createPower coord vel 1] 
-            | powerType <= 0.001 * factor  = [createPower coord vel 2] 
+            | powerType <= 0.00003 * factor = [createPower coord vel 0] 
+            | powerType <= 0.00007 * factor = [createPower coord vel 1] 
+            | powerType <= 0.0001 * factor  = [createPower coord vel 2] 
             | otherwise = []
 
-getNewEnemie :: StdGen -> Time -> [Enemie]
-getNewEnemie g time = newEnemie
+getNewEnemie :: StdGen -> Game -> [Enemie]
+getNewEnemie g (MkGame time restart baseTime points power status) = newEnemie
     where 
         (gT,gPV) = split g
         (gP,gV) = split gPV
         xP = limiteX - 2*(limiteX * ((randomRs (0::Float,1::Float) gP)!!time))
-        yV = (-200) * ((randomRs (0::Float,1::Float) gV)!!time)
-        coord = (xP,360)
+        yVBase = (-200) * ((randomRs (0::Float,1::Float) gV)!!time)
+        yV
+            | yVBase > -50 = -50
+            | otherwise = yVBase
+        coord = (xP,380)
         vel = (0,yV)
         enemType :: Float
         enemType = ((randomRs (0::Float,1::Float) gT)!!time)
-        factor = (log (fromIntegral (100*time) :: Float))
+        factor = (log (fromIntegral (100*(time-baseTime)) :: Float))
         newEnemie
             | enemType <= 0.0005 * factor = [createEnemie coord vel 1] 
             | enemType <= 0.001 * factor = [createEnemie coord vel 0]
             | otherwise = []
 
 getGameTime :: Game -> Time 
-getGameTime (MkGame time points power status) = time
+getGameTime (MkGame time restart baseTime points power status) = time
 
 getGamePoints :: Game -> GameScore 
-getGamePoints (MkGame time points power status) = points
+getGamePoints (MkGame time restart baseTime points power status) = points
 
 
 updateWorld :: StdGen -> Float -> World -> World
@@ -390,52 +400,37 @@ updateWorld g dt (MkWorld game player enemies shots powers stars) = MkWorld game
 
         updatedStars = updateStars dt stars
 
-        newEnemie = getNewEnemie gEnemies time
+        newEnemie = getNewEnemie gEnemies game
         enemiesAll = enemiesUpdated ++ newEnemie
 
-        newPower = getNewPower gPowers time
+        newPower = getNewPower gPowers game
         powersAll = powerUpdated ++ newPower 
 
 
         
 
 getEnemieShip:: Color -> Float -> Picture
-getEnemieShip c scale = getShipFormat c 180 scale scale
+getEnemieShip c scale = getShipFormat1 c 180 scale scale
 
 createEnemie :: (Float,Float) -> (Float,Float) -> Int -> Enemie
-createEnemie coord vel 1  = MkBigEnemie  (getEnemieShip red 1.2) coord vel True 30
-createEnemie coord vel 0  = MkMiniEnemie (getEnemieShip blue 0.8) coord vel True
-createEnemie coord vel _  = MkMiniEnemie (getEnemieShip blue 0.8) coord vel True
+createEnemie coord vel 1  = MkBigEnemie  (getEnemieShip (makeColor r g b 1) 1.2) coord vel True 30
+    where
+        r::Float
+        g::Float
+        b::Float
+        r = 232/255
+        g = 136/255
+        b = 12/255
 
-createEnemies :: StdGen -> Int -> [Enemie]
-createEnemies g n = take n $ zipWith3 createEnemie coords vels tps 
-    where 
-        (g1, g2) = split g
-        (xGen, yGen) = split g1
-        (gTp, gVel) = split g2
+createEnemie coord vel 0  = MkMiniEnemie (getEnemieShip (makeColor r g b 1) 0.8) coord vel True
+    where
+        r::Float
+        g::Float
+        b::Float
+        r = 72/255
+        g = 135/255
+        b = 243/255
 
-   
-        getVel :: Float -> Vel
-        getVel r = (0 , 200 * (sin r))
-        vels = map (\x -> getVel x ) (randoms gVel)
-
-        convertCoord :: Float -> Float -> Coord
-        convertCoord x y = (2*x*limiteX - limiteX,30)
-        coords = zipWith convertCoord (randoms xGen) (randoms yGen)
-
-        getTp :: Float -> Int
-        getTp c = if c <= 0.5
-            then 0
-            else 1
-        
-        calculateTp :: Float -> Int
-        calculateTp f = getTp (sin f)
-        
-        tps :: [Int]
-        tps = map calculateTp (randoms gTp)
-    
-
-        --cores = cycle [red,black,yellow,blue,green]
 
 getStarFormat :: Picture
 getStarFormat = color starColor (circleSolid 2)
@@ -482,9 +477,9 @@ moveThePlayer xPos yPos mv (MkPlayer p (x,y) v) = MkPlayer newPic (newX,y) v
 
 
 createPower :: Coord -> Vel -> Int -> Power 
-createPower coord vel 0 =  (MkPower (color red (circleSolid 20)) coord vel ["Imortal"] 120)
-createPower coord vel 1 =  (MkPower (color yellow (circleSolid 20)) coord vel ["Trio"] 120)
-createPower coord vel 2 =  (MkPower (color green (circleSolid 20)) coord vel ["SuperSpeed"] 120)
+createPower coord vel 0 =  (MkPower (color (makeColor (196/255) (225/255) (11/255) 1) (circleSolid 10)) coord vel ["Imortal"] 300)
+createPower coord vel 1 =  (MkPower (color (makeColor (11/255) (203/255) (225/255) 1) (circleSolid 10)) coord vel ["Trio"] 300)
+createPower coord vel 2 =  (MkPower (color (makeColor (6/255) (208/255) (73/255) 1) (circleSolid 10)) coord vel ["SuperSpeed"] 300)
 
 
 getShotFormat :: Power -> Picture
@@ -510,7 +505,7 @@ createShotWithAngle x y power angle = MkShot (getShotFormat power) (x,y+30) (xv,
         
 
 addShot :: Game -> Player -> Coord -> [Shot] -> [Shot]
-addShot (MkGame time score power status) (MkPlayer p (x,y) v) (xPos,yPos)  shots = shots ++ newShots
+addShot (MkGame time restart baseTime score power status) (MkPlayer p (x,y) v) (xPos,yPos)  shots = shots ++ newShots
     where
         baseAngle = 0.785398
         powerTypes = getPowerTypes power
@@ -544,23 +539,51 @@ inputHandler _ w = w
 
 
 
-getShipFormat :: Color -> Float -> Float -> Float -> Picture
-getShipFormat c r x y = scale x y (color c (rotate r ship))
+getShipFormat1 :: Color -> Float -> Float -> Float -> Picture
+getShipFormat1 c r x y = scale x y (color c (rotate r ship))
+    where 
+         ship = polygon [
+                    (  0,  50),
+                    ( 40,  20),
+                    ( 20,   0),
+                    ( 30, -30),
+                    (  0, -10),
+                    (-30, -30),
+                    (-20,   0),
+                    (-40,  20),
+                    (  0,  50)
+                ]
+
+
+
+getShipFormat2 :: Color -> Float -> Float -> Float -> Picture
+getShipFormat2 c r x y = scale x y (color c (rotate r ship))
     where 
         ship = polygon [
-            (  0,  50),
-            ( 40,  20),
-            ( 20,   0),
-            ( 30, -30),
-            (  0, -10),
-            (-30, -30),
-            (-20,   0),
-            (-40,  20),
-            (  0,  50)
+            (  0, 50),
+            ( 30, 40),
+            ( 40, 20),
+            ( 50,  0),
+            ( 30,-30),
+            (  0,-30),
+            (-30,-30),
+            (-50,  0),
+            (-40, 20),
+            (-30, 40),
+            (  0, 50)
             ]
 
 getPlayerShip :: Float -> Picture
-getPlayerShip ang = getShipFormat green ang 0.75 0.75
+getPlayerShip ang = getShipFormat2 (makeColor r g b 1) ang 0.75 0.75
+    where
+        r::Float
+        g::Float
+        b::Float
+        r = 176/255
+        g = 173/255
+        b = 179/255
+
+
 
 
 main :: IO()
@@ -570,7 +593,7 @@ main = do
         simulationRate = 60
         stars = createStars
         player = MkPlayer (getPlayerShip 0) (0,-230) (0,0)
-        game = MkGame 300 0 NoPower True 
+        game = MkGame 0 0 0 0 NoPower True 
         initWorld = MkWorld game player [] [] [] stars
         
     play
